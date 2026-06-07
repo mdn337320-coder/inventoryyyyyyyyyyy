@@ -203,9 +203,12 @@
 </div>
 
 <script>
-    // ========== YOUR APPS SCRIPT WEB APP URL (INSERTED) ==========
+    // ========== YOUR APPS SCRIPT WEB APP URL ==========
     const API_URL = "https://script.google.com/macros/s/AKfycbw1EWkNq9cC7b7bAO3WkoyyVbobZge8-AzeH4ucSFORTSllkp-62bdrwYPyxxidgyO6/exec";
-    // ================================================================
+    // ==================================================
+    // ========== YOUR IMGBB API KEY ==========
+    const IMGBB_API_KEY = "1da3d77a2c48d00025f394af3e14b136";
+    // =========================================
 
     let currentProduct = null;
     let transactionType = "OUT";
@@ -229,19 +232,20 @@
         }
     }
 
-    // === UPLOAD USING FILECOAST (RELIABLE, NO API KEY) ===
+    // === UPLOAD USING IMGBB WITH YOUR API KEY (RELIABLE) ===
     async function uploadImage(file) {
         const formData = new FormData();
-        formData.append('file', file);
-        const res = await fetch('https://filecoast.com/upload', {
+        formData.append('image', file);
+        const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
             method: 'POST',
             body: formData
         });
         const data = await res.json();
-        if (!data.url) {
-            throw new Error('FileCoast upload failed');
+        if (!data.success) {
+            const errorMsg = data.error?.message || 'Unknown error';
+            throw new Error(`ImgBB: ${errorMsg}`);
         }
-        return data.url;
+        return data.data.url;
     }
 
     function showToast(msg, isErr = false) {
