@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes, viewport-fit=cover">
+    <title>Million Dollar Inventory</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body { background: #f1f5f9; padding-bottom: 80px; }
+        .tab-active { background-color: #3b82f6; color: white; border-radius: 2rem; }
+        .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #1e293b; color: white; padding: 10px 20px; border-radius: 40px; z-index: 1000; font-size: 14px; z-index: 9999; }
+        input, select, textarea { font-size: 16px !important; }
+        .scanner-container { border-radius: 1rem; overflow: hidden; background: #000; }
+        .product-img { width: 40px; height: 40px; object-fit: cover; border-radius: 8px; margin-right: 10px; }
+        .inventory-card { transition: all 0.2s; }
+        .inventory-card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+        }
+        .product-form {
+            background: white;
+            max-width: 90%;
+            width: 450px;
+            max-height: 85vh;
+            overflow-y: auto;
+            border-radius: 1.5rem;
+            padding: 1.5rem;
+        }
+        .product-form input, .product-form select, .product-form textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 0.75rem;
+            margin-top: 4px;
+            margin-bottom: 12px;
+        }
+        .product-form label {
+            font-weight: 500;
+            font-size: 0.875rem;
+        }
+        .photo-preview {
+            width: 80px;
+            height: 80px;
+            object-fit: cover;
+            border-radius: 12px;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+<div class="max-w-4xl mx-auto px-4 pt-5">
+    <div class="flex justify-between items-center bg-white p-3 rounded-2xl shadow-sm mb-5">
+        <h1 class="font-bold text-xl"><i class="fas fa-store text-blue-600"></i> Million $ Inventory</h1>
+        <select id="workerSelect" class="bg-gray-100 p-2 rounded-full text-sm font-medium">
+            <option value="">Select Worker</option>
+        </select>
+    </div>
+
+    <div class="flex bg-white rounded-2xl p-1 mb-6 sticky top-2 z-10">
+        <button data-tab="dashboard" class="tab-btn flex-1 py-2 rounded-xl"><i class="fas fa-chart-line"></i> Dashboard</button>
+        <button data-tab="scan" class="tab-btn flex-1 py-2 rounded-xl"><i class="fas fa-camera"></i> Scan</button>
+        <button data-tab="inventory" class="tab-btn flex-1 py-2 rounded-xl"><i class="fas fa-archive"></i> Inventory</button>
+        <button data-tab="workers" class="tab-btn flex-1 py-2 rounded-xl"><i class="fas fa-users"></i> Workers</button>
+    </div>
+
+    <div id="dashboardTab" class="tab-content space-y-4">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div class="bg-white p-4 rounded-2xl shadow"><p class="text-gray-500 text-xs">Total Products</p><p id="totalProducts" class="text-2xl font-bold">--</p></div>
+            <div class="bg-white p-4 rounded-2xl shadow"><p class="text-gray-500 text-xs">Low Stock</p><p id="lowStockCount" class="text-2xl font-bold text-red-600">--</p></div>
+            <div class="bg-white p-4 rounded-2xl shadow"><p class="text-gray-500 text-xs">📥 Today IN</p><p id="todayIn" class="text-xl font-bold">--</p></div>
+            <div class="bg-white p-4 rounded-2xl shadow"><p class="text-gray-500 text-xs">📤 Today OUT</p><p id="todayOut" class="text-xl font-bold">--</p></div>
+        </div>
+        <div class="bg-white rounded-2xl p-3 shadow"><h3 class="font-semibold mb-2">⚠️ Low Stock Alerts</h3><div id="lowStockList" class="divide-y"></div></div>
+        <div class="bg-white rounded-2xl p-3 shadow"><h3 class="font-semibold mb-2">📋 Recent Activity</h3><div id="recentTransactions" class="space-y-2 text-sm"></div></div>
+    </div>
+
+    <div id="scanTab" class="tab-content hidden space-y-4">
+        <div class="bg-white p-4 rounded-2xl shadow space-y-4">
+            <div class="flex gap-2">
+                <input type="text" id="barcodeInput" placeholder="Scan or type barcode" class="flex-1 border rounded-xl px-4 py-3">
+                <button id="startScannerBtn" class="bg-blue-600 text-white px-4 rounded-xl"><i class="fas fa-camera"></i></button>
+            </div>
+            <div id="qrScannerContainer" style="display:none;" class="rounded-xl overflow-hidden bg-black"></div>
+            <div id="productInfoCard" class="hidden bg-gray-50 p-3 rounded-xl">
+                <p class="font-bold" id="scanProductName"></p>
+                <p>Stock: <span id="scanCurrentStock"></span> <span id="scanUnit"></span></p>
+            </div>
+            <div class="flex gap-3">
+                <button id="typeInBtn" class="flex-1 py-2 rounded-xl bg-green-100 text-green-700">📥 Stock IN</button>
+                <button id="typeOutBtn" class="flex-1 py-2 rounded-xl bg-red-100 text-red-700">🛒 Stock OUT</button>
+            </div>
+            <div class="flex justify-between items-center">
+                <span>Quantity:</span>
+                <div class="flex gap-2 bg-gray-100 rounded-full p-1">
+                    <button id="qtyMinus" class="w-10 h-10 rounded-full bg-white shadow">-</button>
+                    <input id="quantityInput" type="number" value="1" min="1" class="w-16 text-center bg-transparent text-lg">
+                    <button id="qtyPlus" class="w-10 h-10 rounded-full bg-white shadow">+</button>
+                </div>
+            </div>
+            <input type="text" id="notesInput" placeholder="Note (order # / supplier)" class="w-full border rounded-xl p-2">
+            <button id="confirmBtn" class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold">✅ Confirm & Update Stock</button>
+        </div>
+    </div>
+
+    <div id="inventoryTab" class="tab-content hidden space-y-3">
+        <input type="text" id="invSearch" placeholder="Search by name or barcode..." class="w-full border rounded-xl p-2">
+        <div id="inventoryList" class="space-y-2 max-h-[70vh] overflow-auto"></div>
+    </div>
+
+    <div id="workersTab" class="tab-content hidden space-y-3">
+        <div class="flex gap-2">
+            <input type="text" id="newWorkerName" placeholder="New worker name" class="flex-1 border rounded-xl p-2">
+            <button id="addWorkerBtn" class="bg-blue-600 text-white px-4 rounded-xl">Add</button>
+        </div>
+        <div id="workersList" class="bg-white rounded-2xl divide-y"></div>
+    </div>
+</div>
+
+<!-- Modal for product details -->
+<div id="productFormModal" class="modal-overlay hidden">
+    <div class="product-form">
+        <h2 class="text-xl font-bold mb-4">New Product Details</h2>
+        <div id="formMessage" class="text-sm text-red-600 mb-2 hidden"></div>
+        <label>Product Name *</label>
+        <input type="text" id="formProductName" placeholder="Product Name">
+        
+        <label>Category</label>
+        <input type="text" id="formCategory" placeholder="Category (e.g., Skin Care)">
+        
+        <label>Brand</label>
+        <input type="text" id="formBrand" placeholder="Brand">
+        
+        <label>Size</label>
+        <input type="text" id="formSize" placeholder="Size (e.g., 50ml, 10pcs)">
+        
+        <label>Description</label>
+        <textarea id="formDescription" rows="2" placeholder="Description"></textarea>
+        
+        <label>Wholesale Price</label>
+        <input type="number" id="formWholesale" placeholder="0">
+        
+        <label>Retail Price</label>
+        <input type="number" id="formRetail" placeholder="0">
+        
+        <label>Shipping Cost</label>
+        <input type="number" id="formShipping" placeholder="0">
+        
+        <label>Min Stock Alert</label>
+        <input type="number" id="formMinAlert" placeholder="0">
+        
+        <label>Product Photo</label>
+        <div class="flex gap-2 items-center">
+            <button id="takePhotoBtn" type="button" class="bg-gray-200 px-4 py-2 rounded-full text-sm"><i class="fas fa-camera"></i> Take Photo</button>
+            <span id="photoStatus" class="text-xs text-gray-500">No photo</span>
+        </div>
+        <img id="photoPreview" class="photo-preview hidden">
+        <input type="hidden" id="formImageUrl">
+        
+        <div class="flex gap-3 mt-4">
+            <button id="saveNewProductBtn" class="flex-1 bg-green-600 text-white py-2 rounded-xl font-bold">Save Product</button>
+            <button id="cancelFormBtn" class="flex-1 bg-gray-300 text-gray-800 py-2 rounded-xl">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for Edit Product -->
+<div id="productModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+    <div class="bg-white w-full max-w-2xl rounded-2xl p-5 max-h-[85vh] overflow-auto mx-4">
+        <div class="flex justify-between border-b pb-2"><h3 class="font-bold text-lg" id="modalTitle">Edit Product</h3><button id="closeModalBtn"><i class="fas fa-times text-gray-500"></i></button></div>
+        <input type="hidden" id="editBarcode">
+        <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+            <input type="text" id="editProductName" placeholder="Product Name" class="border rounded-lg p-2">
+            <input type="text" id="editCategory" placeholder="Category" class="border rounded-lg p-2">
+            <input type="text" id="editBrand" placeholder="Brand" class="border rounded-lg p-2">
+            <input type="text" id="editSize" placeholder="Size" class="border rounded-lg p-2">
+            <textarea id="editDescription" placeholder="Description" rows="2" class="border rounded-lg p-2 md:col-span-2"></textarea>
+            <input type="number" id="editWholesale" placeholder="Wholesale Price" class="border rounded-lg p-2">
+            <input type="number" id="editRetail" placeholder="Retail Price" class="border rounded-lg p-2">
+            <input type="number" id="editShipping" placeholder="Shipping Cost" class="border rounded-lg p-2">
+            <input type="number" id="editMinAlert" placeholder="Min Stock Alert" class="border rounded-lg p-2">
+            <select id="editStatus" class="border rounded-lg p-2">
+                <option value="Available">Available</option>
+                <option value="Out of Stock">Out of Stock</option>
+                <option value="Discontinued">Discontinued</option>
+            </select>
+        </div>
+        <div class="mt-4">
+            <label class="block text-sm font-medium mb-1">Image URL</label>
+            <input type="text" id="editImageUrl" placeholder="https://..." class="w-full border rounded-lg p-2">
+            <button id="editUploadPhotoBtn" class="mt-2 bg-gray-200 text-gray-800 px-4 py-1 rounded-full text-sm"><i class="fas fa-camera"></i> Take New Photo</button>
+        </div>
+        <div class="mt-4"><button id="saveProductBtn" class="w-full bg-green-600 text-white py-2 rounded-xl font-bold">Save Changes</button></div>
+        <hr class="my-3"><h4 class="font-semibold">Transaction History</h4><div id="historyList" class="text-xs space-y-2 max-h-40 overflow-auto mt-2"></div>
+    </div>
+</div>
+
+<script>
+    // ========== YOUR APPS SCRIPT WEB APP URL (INSERTED) ==========
+    const API_URL = "https://script.google.com/macros/s/AKfycbw1EWkNq9cC7b7bAO3WkoyyVbobZge8-AzeH4ucSFORTSllkp-62bdrwYPyxxidgyO6/exec";
+    // ================================================================
+
+    let currentProduct = null;
+    let transactionType = "OUT";
+    let scanner = null;
+
+    async function callApi(action, data = {}) {
+        try {
+            const res = await fetch(API_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({ request: JSON.stringify({ action, ...data }) })
+            });
+            const text = await res.text();
+            let json;
+            try { json = JSON.parse(text); } catch(e) { throw new Error("Backend error. Check deployment."); }
+            if (!json.success) throw new Error(json.error);
+            return json.data;
+        } catch(err) {
+            showToast(err.message, true);
+            throw err;
+        }
+    }
+
+    // === UPLOAD USING FILECOAST (RELIABLE, NO API KEY) ===
+    async function uploadImage(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('https://filecoast.com/upload', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await res.json();
+        if (!data.url) {
+            throw new Error('FileCoast upload failed');
+        }
+        return data.url;
+    }
+
+    function showToast(msg, isErr = false) {
+        const t = document.createElement('div');
+        t.className = 'toast';
+        t.innerText = msg;
+        if (isErr) t.style.background = '#b91c1c';
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 3000);
+    }
+
+    async function loadWorkers() {
+        try {
+            const workers = await callApi('getWorkers');
+            const sel = document.getElementById('workerSelect');
+            const old = sel.value;
+            sel.innerHTML = '<option value="">-- Select Worker --</option>';
+            workers.forEach(w => { const opt = document.createElement('option'); opt.value = w; opt.innerText = w; if (old === w) opt.selected = true; sel.appendChild(opt); });
+            document.getElementById('workersList').innerHTML = workers.map(w => `<div class="p-3 border-b"><i class="fas fa-user mr-2"></i>${w}</div>`).join('');
+        } catch(e) { console.error(e); }
+    }
+
+    async function refreshDashboard() {
+        try {
+            const stats = await callApi('getDashboardStats');
+            document.getElementById('totalProducts').innerText = stats.totalProducts;
+            document.getElementById('lowStockCount').innerText = stats.lowStockCount;
+            document.getElementById('todayIn').innerText = stats.todayIns;
+            document.getElementById('todayOut').innerText = stats.todayOuts;
+            document.getElementById('lowStockList').innerHTML = stats.lowStockProducts.map(p => `<div class="py-2 flex justify-between"><span>${p.Name}</span><span class="text-red-600">${p.Stock}/${p.MinAlert}</span></div>`).join('') || '<div class="text-gray-400">✅ All good</div>';
+            document.getElementById('recentTransactions').innerHTML = stats.recentTransactions.map(t => `<div class="flex justify-between border-b pb-1"><span>${t.Type} ${t.Qty} ${t.Product}</span><span class="text-xs">${t.Worker} ${t.Time}</span></div>`).join('');
+        } catch(e) { console.error(e); }
+    }
+
+    async function loadInventory(search = '') {
+        try {
+            let products = await callApi('getProducts');
+            if (search) products = products.filter(p => p.ProductName.toLowerCase().includes(search) || p.Barcode.includes(search));
+            const container = document.getElementById('inventoryList');
+            if (!products.length) { container.innerHTML = '<div class="bg-white p-8 text-center text-gray-400 rounded-2xl">No products yet. Scan a barcode.</div>'; return; }
+            container.innerHTML = products.map(p => `
+                <div class="bg-white p-3 rounded-xl shadow-sm inventory-card flex flex-wrap items-center justify-between gap-2">
+                    <div class="flex items-center gap-2 flex-1 min-w-0">
+                        ${p.ImageUrl ? `<img src="${p.ImageUrl}" class="product-img" onerror="this.style.display='none'">` : ''}
+                        <div class="truncate"><p class="font-semibold">${p.ProductName}</p><p class="text-xs text-gray-500">${p.Barcode} | Stock: ${p.Stock} | ${p.Category} | ${p.Brand}</p><p class="text-xs">Wholesale: ৳${p.WholesalePrice} | Retail: ৳${p.RetailPrice}</p></div>
+                    </div>
+                    <button class="edit-product-btn bg-blue-50 text-blue-600 px-3 py-1 rounded-lg text-sm" data-barcode="${p.Barcode}"><i class="fas fa-edit"></i> Edit</button>
+                </div>
+            `).join('');
+            document.querySelectorAll('.edit-product-btn').forEach(btn => btn.onclick = () => openModal(btn.dataset.barcode));
+        } catch(e) { console.error(e); }
+    }
+
+    async function lookupBarcode(barcode) {
+        if (!barcode) return;
+        try {
+            const prod = await callApi('getProductByBarcode', { barcode });
+            const card = document.getElementById('productInfoCard');
+            if (prod) {
+                currentProduct = prod;
+                document.getElementById('scanProductName').innerText = prod.ProductName;
+                document.getElementById('scanCurrentStock').innerText = prod.Stock;
+                card.classList.remove('hidden');
+            } else {
+                currentProduct = null;
+                card.classList.add('hidden');
+                showToast("New product! Please fill details after confirming.", false);
+            }
+        } catch(e) { console.error(e); }
+    }
+
+    function takePhoto() {
+        return new Promise((resolve) => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.capture = 'environment';
+            input.onchange = async (e) => {
+                if (e.target.files && e.target.files[0]) {
+                    const file = e.target.files[0];
+                    showToast("Uploading photo...");
+                    try {
+                        const url = await uploadImage(file);
+                        resolve(url);
+                    } catch(err) {
+                        showToast("Upload failed: " + err.message, true);
+                        resolve(null);
+                    }
+                } else {
+                    resolve(null);
+                }
+            };
+            input.click();
+        });
+    }
+
+    function showProductForm(barcode, qty, worker, notes) {
+        const modal = document.getElementById('productFormModal');
+        const formProductName = document.getElementById('formProductName');
+        const formCategory = document.getElementById('formCategory');
+        const formBrand = document.getElementById('formBrand');
+        const formSize = document.getElementById('formSize');
+        const formDescription = document.getElementById('formDescription');
+        const formWholesale = document.getElementById('formWholesale');
+        const formRetail = document.getElementById('formRetail');
+        const formShipping = document.getElementById('formShipping');
+        const formMinAlert = document.getElementById('formMinAlert');
+        const formImageUrl = document.getElementById('formImageUrl');
+        const photoPreview = document.getElementById('photoPreview');
+        const photoStatus = document.getElementById('photoStatus');
+        
+        formProductName.value = '';
+        formCategory.value = '';
+        formBrand.value = '';
+        formSize.value = '';
+        formDescription.value = '';
+        formWholesale.value = '0';
+        formRetail.value = '0';
+        formShipping.value = '0';
+        formMinAlert.value = '0';
+        formImageUrl.value = '';
+        photoPreview.classList.add('hidden');
+        photoStatus.innerText = 'No photo';
+        document.getElementById('formMessage').classList.add('hidden');
+        
+        window.pendingNewProduct = { barcode, qty, worker, notes };
+        
+        const takePhotoBtn = document.getElementById('takePhotoBtn');
+        const saveBtn = document.getElementById('saveNewProductBtn');
+        const cancelBtn = document.getElementById('cancelFormBtn');
+        
+        const photoHandler = async () => {
+            const url = await takePhoto();
+            if (url) {
+                formImageUrl.value = url;
+                photoPreview.src = url;
+                photoPreview.classList.remove('hidden');
+                photoStatus.innerText = 'Photo taken';
+            } else {
+                photoStatus.innerText = 'No photo (upload failed)';
+            }
+        };
+        takePhotoBtn.onclick = photoHandler;
+        
+        const saveHandler = async () => {
+            const productName = formProductName.value.trim();
+            if (!productName) {
+                document.getElementById('formMessage').innerText = 'Product name is required';
+                document.getElementById('formMessage').classList.remove('hidden');
+                return;
+            }
+            document.getElementById('formMessage').classList.add('hidden');
+            const category = formCategory.value;
+            const brand = formBrand.value;
+            const size = formSize.value;
+            const description = formDescription.value;
+            const wholesale = parseFloat(formWholesale.value) || 0;
+            const retail = parseFloat(formRetail.value) || 0;
+            const shipping = parseFloat(formShipping.value) || 0;
+            const minAlert = parseInt(formMinAlert.value) || 0;
+            const imageUrl = formImageUrl.value;
+            
+            try {
+                await callApi('addNewProduct', {
+                    barcode: window.pendingNewProduct.barcode,
+                    productName,
+                    category, brand, size, description,
+                    wholesalePrice: wholesale,
+                    retailPrice: retail,
+                    shippingCost: shipping,
+                    initialStock: window.pendingNewProduct.qty,
+                    imageUrl,
+                    status: 'Available',
+                    minAlert: minAlert
+                });
+                await callApi('processTransaction', {
+                    worker: window.pendingNewProduct.worker,
+                    barcode: window.pendingNewProduct.barcode,
+                    type: 'IN',
+                    qty: window.pendingNewProduct.qty,
+                    notes: window.pendingNewProduct.notes
+                });
+                showToast(`Product "${productName}" added with stock ${window.pendingNewProduct.qty}`);
+                modal.classList.add('hidden');
+                refreshDashboard();
+                loadInventory();
+                document.getElementById('barcodeInput').value = '';
+                document.getElementById('quantityInput').value = '1';
+                document.getElementById('notesInput').value = '';
+                document.getElementById('productInfoCard').classList.add('hidden');
+                currentProduct = null;
+            } catch(e) {
+                showToast(e.message, true);
+            }
+        };
+        saveBtn.onclick = saveHandler;
+        cancelBtn.onclick = () => modal.classList.add('hidden');
+        modal.classList.remove('hidden');
+    }
+
+    async function confirmTransaction() {
+        const worker = document.getElementById('workerSelect').value;
+        if (!worker) { showToast("Select a worker", true); return; }
+        const barcode = document.getElementById('barcodeInput').value.trim();
+        if (!barcode) { showToast("Enter barcode", true); return; }
+        let qty = parseInt(document.getElementById('quantityInput').value);
+        if (isNaN(qty) || qty < 1) qty = 1;
+        const notes = document.getElementById('notesInput').value;
+        
+        if (!currentProduct && transactionType === 'IN') {
+            showProductForm(barcode, qty, worker, notes);
+        } else if (!currentProduct && transactionType === 'OUT') {
+            showToast("Product not found", true);
+        } else if (currentProduct) {
+            try {
+                await callApi('processTransaction', { worker, barcode, type: transactionType, qty, notes });
+                showToast(`${transactionType} ${qty} → stock updated`);
+                document.getElementById('barcodeInput').value = '';
+                document.getElementById('quantityInput').value = '1';
+                document.getElementById('notesInput').value = '';
+                document.getElementById('productInfoCard').classList.add('hidden');
+                currentProduct = null;
+                refreshDashboard();
+                loadInventory();
+            } catch(e) {
+                showToast(e.message, true);
+            }
+        }
+    }
+
+    function startCamera() {
+        const container = document.getElementById('qrScannerContainer');
+        container.style.display = 'block';
+        container.innerHTML = '<div id="reader" style="width:100%"></div>';
+        const html5Qr = new Html5Qrcode("reader");
+        scanner = html5Qr;
+        html5Qr.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, decoded => {
+            document.getElementById('barcodeInput').value = decoded;
+            lookupBarcode(decoded);
+            html5Qr.stop();
+            container.style.display = 'none';
+        }, err => console.warn(err));
+    }
+
+    async function openModal(barcode) {
+        try {
+            const product = await callApi('getProductByBarcode', { barcode });
+            document.getElementById('editBarcode').value = barcode;
+            document.getElementById('editProductName').value = product.ProductName;
+            document.getElementById('editCategory').value = product.Category;
+            document.getElementById('editBrand').value = product.Brand;
+            document.getElementById('editSize').value = product.Size;
+            document.getElementById('editDescription').value = product.Description;
+            document.getElementById('editWholesale').value = product.WholesalePrice;
+            document.getElementById('editRetail').value = product.RetailPrice;
+            document.getElementById('editShipping').value = product.ShippingCost;
+            document.getElementById('editMinAlert').value = product.MinAlert;
+            document.getElementById('editStatus').value = product.Status;
+            document.getElementById('editImageUrl').value = product.ImageUrl;
+            const history = await callApi('getProductHistory', { barcode });
+            document.getElementById('historyList').innerHTML = history.map(h => `<div>${h.Date} ${h.Type} ${h.Qty} → ${h.StockAfter} (${h.Worker})</div>`).join('') || '<div>No history</div>';
+            document.getElementById('productModal').classList.remove('hidden');
+        } catch(e) { showToast("Failed to load", true); }
+    }
+
+    async function saveProduct() {
+        const barcode = document.getElementById('editBarcode').value;
+        const updates = {
+            'Product Name': document.getElementById('editProductName').value,
+            'Category': document.getElementById('editCategory').value,
+            'Brand': document.getElementById('editBrand').value,
+            'Size': document.getElementById('editSize').value,
+            'Description': document.getElementById('editDescription').value,
+            'Wholesale Price': parseFloat(document.getElementById('editWholesale').value) || 0,
+            'Retail Price': parseFloat(document.getElementById('editRetail').value) || 0,
+            'Shipping Cost': parseFloat(document.getElementById('editShipping').value) || 0,
+            'Min Alert': parseInt(document.getElementById('editMinAlert').value) || 0,
+            'Status': document.getElementById('editStatus').value,
+            'Image URL': document.getElementById('editImageUrl').value
+        };
+        try {
+            await callApi('updateProduct', { barcode, updates });
+            showToast("Product updated");
+            document.getElementById('productModal').classList.add('hidden');
+            refreshDashboard();
+            loadInventory();
+        } catch(e) { showToast("Update failed", true); }
+    }
+
+    async function editTakePhoto() {
+        const url = await takePhoto();
+        if (url) document.getElementById('editImageUrl').value = url;
+    }
+
+    document.getElementById('startScannerBtn').onclick = startCamera;
+    document.getElementById('typeInBtn').onclick = () => { transactionType = "IN"; document.getElementById('typeInBtn').classList.add('bg-green-200'); document.getElementById('typeOutBtn').classList.remove('bg-red-200'); };
+    document.getElementById('typeOutBtn').onclick = () => { transactionType = "OUT"; document.getElementById('typeOutBtn').classList.add('bg-red-200'); document.getElementById('typeInBtn').classList.remove('bg-red-200'); };
+    document.getElementById('confirmBtn').onclick = confirmTransaction;
+    document.getElementById('qtyMinus').onclick = () => { let inp = document.getElementById('quantityInput'); if (inp.value > 1) inp.value--; };
+    document.getElementById('qtyPlus').onclick = () => { let inp = document.getElementById('quantityInput'); inp.value++; };
+    document.getElementById('addWorkerBtn').onclick = async () => { const name = document.getElementById('newWorkerName').value.trim(); if(name) { await callApi('addWorker', { workerName: name }); loadWorkers(); document.getElementById('newWorkerName').value = ''; } };
+    document.getElementById('invSearch').addEventListener('input', e => loadInventory(e.target.value));
+    document.getElementById('saveProductBtn').onclick = saveProduct;
+    document.getElementById('closeModalBtn').onclick = () => document.getElementById('productModal').classList.add('hidden');
+    document.getElementById('editUploadPhotoBtn').onclick = editTakePhoto;
+
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.onclick = () => {
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
+            document.getElementById(btn.dataset.tab + 'Tab').classList.remove('hidden');
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-active', 'bg-blue-600', 'text-white'));
+            btn.classList.add('tab-active', 'bg-blue-600', 'text-white');
+            if (btn.dataset.tab === 'dashboard') refreshDashboard();
+            if (btn.dataset.tab === 'inventory') loadInventory();
+            if (btn.dataset.tab === 'workers') loadWorkers();
+        };
+    });
+    document.querySelector('.tab-btn[data-tab="dashboard"]').click();
+    loadWorkers();
+</script>
+</body>
+</html>
