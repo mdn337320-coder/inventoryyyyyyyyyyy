@@ -131,22 +131,31 @@
         <div id="formMessage" class="text-sm text-red-600 mb-2 hidden"></div>
         <label>Product Name *</label>
         <input type="text" id="formProductName" placeholder="Product Name">
+        
         <label>Category</label>
         <input type="text" id="formCategory" placeholder="Category">
+        
         <label>Brand</label>
         <input type="text" id="formBrand" placeholder="Brand">
+        
         <label>Size</label>
         <input type="text" id="formSize" placeholder="Size (e.g., 50ml)">
+        
         <label>Description</label>
         <textarea id="formDescription" rows="2" placeholder="Description"></textarea>
+        
         <label>Wholesale Price</label>
         <input type="number" id="formWholesale" placeholder="0">
+        
         <label>Retail Price</label>
         <input type="number" id="formRetail" placeholder="0">
+        
         <label>Shipping Cost</label>
         <input type="number" id="formShipping" placeholder="0">
+        
         <label>Min Stock Alert</label>
         <input type="number" id="formMinAlert" placeholder="0">
+        
         <label>Product Photo</label>
         <div class="flex gap-2 items-center">
             <button id="takePhotoBtn" type="button" class="bg-gray-200 px-4 py-2 rounded-full text-sm"><i class="fas fa-camera"></i> Take Photo</button>
@@ -154,6 +163,7 @@
         </div>
         <img id="photoPreview" class="photo-preview hidden">
         <input type="hidden" id="formImageUrl">
+        
         <div class="flex gap-3 mt-4">
             <button id="saveNewProductBtn" class="flex-1 bg-green-600 text-white py-2 rounded-xl font-bold">Save Product</button>
             <button id="cancelFormBtn" class="flex-1 bg-gray-300 text-gray-800 py-2 rounded-xl">Cancel</button>
@@ -193,36 +203,47 @@
 </div>
 
 <script>
+    // ========== YOUR APPS SCRIPT WEB APP URL ==========
     const API_URL = "https://script.google.com/macros/s/AKfycbw1EWkNq9cC7b7bAO3WkoyyVbobZge8-AzeH4ucSFORTSllkp-62bdrwYPyxxidgyO6/exec";
-    let currentProduct = null, transactionType = "OUT", scanner = null;
+    // ==================================================
+    // ========== YOUR IMGBB API KEY (the one that worked) ==========
+    const IMGBB_API_KEY = "1da3d77a2c48d00025f394af3e14b136";
+    // ================================================================
+
+    let currentProduct = null;
+    let transactionType = "OUT";
+    let scanner = null;
 
     async function callApi(action, data = {}) {
-        const res = await fetch(API_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({ request: JSON.stringify({ action, ...data }) })
-        });
-        const json = await res.json();
-        if (!json.success) throw new Error(json.error);
-        return json.data;
+        try {
+            const res = await fetch(API_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({ request: JSON.stringify({ action, ...data }) })
+            });
+            const text = await res.text();
+            let json;
+            try { json = JSON.parse(text); } catch(e) { throw new Error("Backend error. Check deployment."); }
+            if (!json.success) throw new Error(json.error);
+            return json.data;
+        } catch(err) {
+            showToast(err.message, true);
+            throw err;
+        }
     }
 
-    async function uploadPhotoToBackend(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-                try {
-                    const result = await callApi('uploadPhoto', {
-                        imageData: e.target.result,
-                        fileName: file.name || 'product.jpg'
-                    });
-                    if (result.success) resolve(result.url);
-                    else reject(new Error(result.error));
-                } catch(err) { reject(err); }
-            };
-            reader.onerror = () => reject(new Error('Failed to read file'));
-            reader.readAsDataURL(file);
+    async function uploadToImgBB(file) {
+        const formData = new FormData();
+        formData.append('image', file);
+        const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+            method: 'POST',
+            body: formData
         });
+        const data = await res.json();
+        if (!data.success) {
+            throw new Error(`ImgBB error: ${data.error?.message || 'Unknown'}`);
+        }
+        return data.data.url;
     }
 
     async function takePhoto() {
@@ -233,15 +254,18 @@
             input.capture = 'environment';
             input.onchange = async (e) => {
                 if (e.target.files && e.target.files[0]) {
-                    showToast("Uploading photo to Drive...");
+                    const file = e.target.files[0];
+                    showToast("Uploading photo...");
                     try {
-                        const url = await uploadPhotoToBackend(e.target.files[0]);
+                        const url = await uploadToImgBB(file);
                         resolve(url);
                     } catch(err) {
                         showToast("Upload failed: " + err.message, true);
                         resolve(null);
                     }
-                } else resolve(null);
+                } else {
+                    resolve(null);
+                }
             };
             input.click();
         });
@@ -256,10 +280,289 @@
         setTimeout(() => t.remove(), 3000);
     }
 
-    // ... (rest of the functions are identical to previous version, just use the new takePhoto)
-    // To save space, I'll include the remaining functions – they are the same as before.
-    // But for brevity, I'll provide the full file in the final answer. 
-    // Given the length, I'll paste the complete working script in the final response.
+    async function loadWorkers() {
+        try {
+            const workers = await callApi('getWorkers');
+            const sel = document.getElementById('workerSelect');
+            const old = sel.value;
+            sel.innerHTML = '<option value="">-- Select Worker --</option>';
+            workers.forEach(w => { const opt = document.createElement('option'); opt.value = w; opt.innerText = w; if (old === w) opt.selected = true; sel.appendChild(opt); });
+            document.getElementById('workersList').innerHTML = workers.map(w => `<div class="p-3 border-b"><i class="fas fa-user mr-2"></i>${w}</div>`).join('');
+        } catch(e) { console.error(e); }
+    }
+
+    async function refreshDashboard() {
+        try {
+            const stats = await callApi('getDashboardStats');
+            document.getElementById('totalProducts').innerText = stats.totalProducts;
+            document.getElementById('lowStockCount').innerText = stats.lowStockCount;
+            document.getElementById('todayIn').innerText = stats.todayIns;
+            document.getElementById('todayOut').innerText = stats.todayOuts;
+            document.getElementById('lowStockList').innerHTML = stats.lowStockProducts.map(p => `<div class="py-2 flex justify-between"><span>${p.Name}</span><span class="text-red-600">${p.Stock}/${p.MinAlert}</span></div>`).join('') || '<div class="text-gray-400">✅ All good</div>';
+            document.getElementById('recentTransactions').innerHTML = stats.recentTransactions.map(t => `<div class="flex justify-between border-b pb-1"><span>${t.Type} ${t.Qty} ${t.Product}</span><span class="text-xs">${t.Worker} ${t.Time}</span></div>`).join('');
+        } catch(e) { console.error(e); }
+    }
+
+    async function loadInventory(search = '') {
+        try {
+            let products = await callApi('getProducts');
+            if (search) products = products.filter(p => p.ProductName.toLowerCase().includes(search) || p.Barcode.includes(search));
+            const container = document.getElementById('inventoryList');
+            if (!products.length) { container.innerHTML = '<div class="bg-white p-8 text-center text-gray-400 rounded-2xl">No products yet. Scan a barcode.</div>'; return; }
+            container.innerHTML = products.map(p => `
+                <div class="bg-white p-3 rounded-xl shadow-sm inventory-card flex flex-wrap items-center justify-between gap-2">
+                    <div class="flex items-center gap-2 flex-1 min-w-0">
+                        ${p.ImageUrl ? `<img src="${p.ImageUrl}" class="product-img" onerror="this.style.display='none'">` : ''}
+                        <div class="truncate"><p class="font-semibold">${p.ProductName}</p><p class="text-xs text-gray-500">${p.Barcode} | Stock: ${p.Stock} | ${p.Category} | ${p.Brand}</p><p class="text-xs">Wholesale: ৳${p.WholesalePrice} | Retail: ৳${p.RetailPrice}</p></div>
+                    </div>
+                    <button class="edit-product-btn bg-blue-50 text-blue-600 px-3 py-1 rounded-lg text-sm" data-barcode="${p.Barcode}"><i class="fas fa-edit"></i> Edit</button>
+                </div>
+            `).join('');
+            document.querySelectorAll('.edit-product-btn').forEach(btn => btn.onclick = () => openModal(btn.dataset.barcode));
+        } catch(e) { console.error(e); }
+    }
+
+    async function lookupBarcode(barcode) {
+        if (!barcode) return;
+        try {
+            const prod = await callApi('getProductByBarcode', { barcode });
+            const card = document.getElementById('productInfoCard');
+            if (prod) {
+                currentProduct = prod;
+                document.getElementById('scanProductName').innerText = prod.ProductName;
+                document.getElementById('scanCurrentStock').innerText = prod.Stock;
+                card.classList.remove('hidden');
+            } else {
+                currentProduct = null;
+                card.classList.add('hidden');
+                showToast("New product! Please fill details after confirming.", false);
+            }
+        } catch(e) { console.error(e); }
+    }
+
+    function showProductForm(barcode, qty, worker, notes) {
+        const modal = document.getElementById('productFormModal');
+        const formProductName = document.getElementById('formProductName');
+        const formCategory = document.getElementById('formCategory');
+        const formBrand = document.getElementById('formBrand');
+        const formSize = document.getElementById('formSize');
+        const formDescription = document.getElementById('formDescription');
+        const formWholesale = document.getElementById('formWholesale');
+        const formRetail = document.getElementById('formRetail');
+        const formShipping = document.getElementById('formShipping');
+        const formMinAlert = document.getElementById('formMinAlert');
+        const formImageUrl = document.getElementById('formImageUrl');
+        const photoPreview = document.getElementById('photoPreview');
+        const photoStatus = document.getElementById('photoStatus');
+        
+        formProductName.value = '';
+        formCategory.value = '';
+        formBrand.value = '';
+        formSize.value = '';
+        formDescription.value = '';
+        formWholesale.value = '0';
+        formRetail.value = '0';
+        formShipping.value = '0';
+        formMinAlert.value = '0';
+        formImageUrl.value = '';
+        photoPreview.classList.add('hidden');
+        photoStatus.innerText = 'No photo';
+        document.getElementById('formMessage').classList.add('hidden');
+        
+        window.pendingNewProduct = { barcode, qty, worker, notes };
+        
+        const takePhotoBtn = document.getElementById('takePhotoBtn');
+        const saveBtn = document.getElementById('saveNewProductBtn');
+        const cancelBtn = document.getElementById('cancelFormBtn');
+        
+        const photoHandler = async () => {
+            const url = await takePhoto();
+            if (url) {
+                formImageUrl.value = url;
+                photoPreview.src = url;
+                photoPreview.classList.remove('hidden');
+                photoStatus.innerText = 'Photo taken';
+            } else {
+                photoStatus.innerText = 'No photo (upload failed)';
+            }
+        };
+        takePhotoBtn.onclick = photoHandler;
+        
+        const saveHandler = async () => {
+            const productName = formProductName.value.trim();
+            if (!productName) {
+                document.getElementById('formMessage').innerText = 'Product name is required';
+                document.getElementById('formMessage').classList.remove('hidden');
+                return;
+            }
+            document.getElementById('formMessage').classList.add('hidden');
+            const category = formCategory.value;
+            const brand = formBrand.value;
+            const size = formSize.value;
+            const description = formDescription.value;
+            const wholesale = parseFloat(formWholesale.value) || 0;
+            const retail = parseFloat(formRetail.value) || 0;
+            const shipping = parseFloat(formShipping.value) || 0;
+            const minAlert = parseInt(formMinAlert.value) || 0;
+            const imageUrl = formImageUrl.value;
+            
+            try {
+                await callApi('addNewProduct', {
+                    barcode: window.pendingNewProduct.barcode,
+                    productName,
+                    category, brand, size, description,
+                    wholesalePrice: wholesale,
+                    retailPrice: retail,
+                    shippingCost: shipping,
+                    initialStock: window.pendingNewProduct.qty,
+                    imageUrl,
+                    status: 'Available',
+                    minAlert: minAlert
+                });
+                await callApi('processTransaction', {
+                    worker: window.pendingNewProduct.worker,
+                    barcode: window.pendingNewProduct.barcode,
+                    type: 'IN',
+                    qty: window.pendingNewProduct.qty,
+                    notes: window.pendingNewProduct.notes
+                });
+                showToast(`Product "${productName}" added with stock ${window.pendingNewProduct.qty}`);
+                modal.classList.add('hidden');
+                refreshDashboard();
+                loadInventory();
+                document.getElementById('barcodeInput').value = '';
+                document.getElementById('quantityInput').value = '1';
+                document.getElementById('notesInput').value = '';
+                document.getElementById('productInfoCard').classList.add('hidden');
+                currentProduct = null;
+            } catch(e) {
+                showToast(e.message, true);
+            }
+        };
+        saveBtn.onclick = saveHandler;
+        cancelBtn.onclick = () => modal.classList.add('hidden');
+        modal.classList.remove('hidden');
+    }
+
+    async function confirmTransaction() {
+        const worker = document.getElementById('workerSelect').value;
+        if (!worker) { showToast("Select a worker", true); return; }
+        const barcode = document.getElementById('barcodeInput').value.trim();
+        if (!barcode) { showToast("Enter barcode", true); return; }
+        let qty = parseInt(document.getElementById('quantityInput').value);
+        if (isNaN(qty) || qty < 1) qty = 1;
+        const notes = document.getElementById('notesInput').value;
+        
+        if (!currentProduct && transactionType === 'IN') {
+            showProductForm(barcode, qty, worker, notes);
+        } else if (!currentProduct && transactionType === 'OUT') {
+            showToast("Product not found", true);
+        } else if (currentProduct) {
+            try {
+                await callApi('processTransaction', { worker, barcode, type: transactionType, qty, notes });
+                showToast(`${transactionType} ${qty} → stock updated`);
+                document.getElementById('barcodeInput').value = '';
+                document.getElementById('quantityInput').value = '1';
+                document.getElementById('notesInput').value = '';
+                document.getElementById('productInfoCard').classList.add('hidden');
+                currentProduct = null;
+                refreshDashboard();
+                loadInventory();
+            } catch(e) {
+                showToast(e.message, true);
+            }
+        }
+    }
+
+    function startCamera() {
+        const container = document.getElementById('qrScannerContainer');
+        container.style.display = 'block';
+        container.innerHTML = '<div id="reader" style="width:100%"></div>';
+        const html5Qr = new Html5Qrcode("reader");
+        scanner = html5Qr;
+        html5Qr.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, decoded => {
+            document.getElementById('barcodeInput').value = decoded;
+            lookupBarcode(decoded);
+            html5Qr.stop();
+            container.style.display = 'none';
+        }, err => console.warn(err));
+    }
+
+    async function openModal(barcode) {
+        try {
+            const product = await callApi('getProductByBarcode', { barcode });
+            document.getElementById('editBarcode').value = barcode;
+            document.getElementById('editProductName').value = product.ProductName;
+            document.getElementById('editCategory').value = product.Category;
+            document.getElementById('editBrand').value = product.Brand;
+            document.getElementById('editSize').value = product.Size;
+            document.getElementById('editDescription').value = product.Description;
+            document.getElementById('editWholesale').value = product.WholesalePrice;
+            document.getElementById('editRetail').value = product.RetailPrice;
+            document.getElementById('editShipping').value = product.ShippingCost;
+            document.getElementById('editMinAlert').value = product.MinAlert;
+            document.getElementById('editStatus').value = product.Status;
+            document.getElementById('editImageUrl').value = product.ImageUrl;
+            const history = await callApi('getProductHistory', { barcode });
+            document.getElementById('historyList').innerHTML = history.map(h => `<div>${h.Date} ${h.Type} ${h.Qty} → ${h.StockAfter} (${h.Worker})</div>`).join('') || '<div>No history</div>';
+            document.getElementById('productModal').classList.remove('hidden');
+        } catch(e) { showToast("Failed to load", true); }
+    }
+
+    async function saveProduct() {
+        const barcode = document.getElementById('editBarcode').value;
+        const updates = {
+            'Product Name': document.getElementById('editProductName').value,
+            'Category': document.getElementById('editCategory').value,
+            'Brand': document.getElementById('editBrand').value,
+            'Size': document.getElementById('editSize').value,
+            'Description': document.getElementById('editDescription').value,
+            'Wholesale Price': parseFloat(document.getElementById('editWholesale').value) || 0,
+            'Retail Price': parseFloat(document.getElementById('editRetail').value) || 0,
+            'Shipping Cost': parseFloat(document.getElementById('editShipping').value) || 0,
+            'Min Alert': parseInt(document.getElementById('editMinAlert').value) || 0,
+            'Status': document.getElementById('editStatus').value,
+            'Image URL': document.getElementById('editImageUrl').value
+        };
+        try {
+            await callApi('updateProduct', { barcode, updates });
+            showToast("Product updated");
+            document.getElementById('productModal').classList.add('hidden');
+            refreshDashboard();
+            loadInventory();
+        } catch(e) { showToast("Update failed", true); }
+    }
+
+    async function editTakePhoto() {
+        const url = await takePhoto();
+        if (url) document.getElementById('editImageUrl').value = url;
+    }
+
+    document.getElementById('startScannerBtn').onclick = startCamera;
+    document.getElementById('typeInBtn').onclick = () => { transactionType = "IN"; document.getElementById('typeInBtn').classList.add('bg-green-200'); document.getElementById('typeOutBtn').classList.remove('bg-red-200'); };
+    document.getElementById('typeOutBtn').onclick = () => { transactionType = "OUT"; document.getElementById('typeOutBtn').classList.add('bg-red-200'); document.getElementById('typeInBtn').classList.remove('bg-red-200'); };
+    document.getElementById('confirmBtn').onclick = confirmTransaction;
+    document.getElementById('qtyMinus').onclick = () => { let inp = document.getElementById('quantityInput'); if (inp.value > 1) inp.value--; };
+    document.getElementById('qtyPlus').onclick = () => { let inp = document.getElementById('quantityInput'); inp.value++; };
+    document.getElementById('addWorkerBtn').onclick = async () => { const name = document.getElementById('newWorkerName').value.trim(); if(name) { await callApi('addWorker', { workerName: name }); loadWorkers(); document.getElementById('newWorkerName').value = ''; } };
+    document.getElementById('invSearch').addEventListener('input', e => loadInventory(e.target.value));
+    document.getElementById('saveProductBtn').onclick = saveProduct;
+    document.getElementById('closeModalBtn').onclick = () => document.getElementById('productModal').classList.add('hidden');
+    document.getElementById('editUploadPhotoBtn').onclick = editTakePhoto;
+
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.onclick = () => {
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
+            document.getElementById(btn.dataset.tab + 'Tab').classList.remove('hidden');
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-active', 'bg-blue-600', 'text-white'));
+            btn.classList.add('tab-active', 'bg-blue-600', 'text-white');
+            if (btn.dataset.tab === 'dashboard') refreshDashboard();
+            if (btn.dataset.tab === 'inventory') loadInventory();
+            if (btn.dataset.tab === 'workers') loadWorkers();
+        };
+    });
+    document.querySelector('.tab-btn[data-tab="dashboard"]').click();
+    loadWorkers();
 </script>
 </body>
 </html>
