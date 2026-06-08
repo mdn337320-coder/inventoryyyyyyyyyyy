@@ -12,7 +12,20 @@
         .tab-active { background-color: #3b82f6; color: white; border-radius: 2rem; }
         .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #1e293b; color: white; padding: 10px 20px; border-radius: 40px; z-index: 1000; font-size: 14px; z-index: 9999; }
         input, select, textarea { font-size: 16px !important; }
-        .scanner-container { border-radius: 1rem; overflow: hidden; background: #000; }
+        .scanner-container { border-radius: 1rem; overflow: hidden; background: #000; position: relative; }
+        .scanner-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            pointer-events: none;
+            z-index: 10;
+        }
         .product-img { width: 40px; height: 40px; object-fit: cover; border-radius: 8px; margin-right: 10px; }
         .inventory-card { transition: all 0.2s; }
         .inventory-card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
@@ -86,9 +99,9 @@
         <div class="bg-white p-4 rounded-2xl shadow space-y-4">
             <div class="flex gap-2">
                 <input type="text" id="barcodeInput" placeholder="Scan or type barcode" class="flex-1 border rounded-xl px-4 py-3">
-                <button id="startScannerBtn" class="bg-blue-600 text-white px-4 rounded-xl"><i class="fas fa-camera"></i></button>
+                <button id="startScannerBtn" class="bg-blue-600 text-white px-4 rounded-xl"><i class="fas fa-camera"></i> Scan</button>
             </div>
-            <div id="qrScannerContainer" style="display:none;" class="rounded-xl overflow-hidden bg-black"></div>
+            <div id="qrScannerContainer" style="display:none;" class="scanner-container rounded-xl"></div>
             <div id="productInfoCard" class="hidden bg-gray-50 p-3 rounded-xl">
                 <p class="font-bold" id="scanProductName"></p>
                 <p>Stock: <span id="scanCurrentStock"></span> <span id="scanUnit"></span></p>
@@ -206,13 +219,14 @@
     // ========== YOUR APPS SCRIPT WEB APP URL ==========
     const API_URL = "https://script.google.com/macros/s/AKfycbw1EWkNq9cC7b7bAO3WkoyyVbobZge8-AzeH4ucSFORTSllkp-62bdrwYPyxxidgyO6/exec";
     // ==================================================
-    // ========== YOUR IMGBB API KEY (the one that worked) ==========
+    // ========== YOUR IMGBB API KEY ==========
     const IMGBB_API_KEY = "1da3d77a2c48d00025f394af3e14b136";
-    // ================================================================
+    // =========================================
 
     let currentProduct = null;
     let transactionType = "OUT";
     let scanner = null;
+    let isScannerActive = false;
 
     async function callApi(action, data = {}) {
         try {
@@ -474,19 +488,73 @@
         }
     }
 
-    function startCamera() {
+    // ========== FIXED SCANNER FUNCTION – PROPER DESTROY & REINIT ==========
+    let currentScannerInstance = null;
+
+    async function startCamera() {
+        // If scanner is already active, stop and destroy it first
+        if (currentScannerInstance) {
+            try {
+                await currentScannerInstance.stop();
+                await currentScannerInstance.clear();
+            } catch(e) { console.warn("Error stopping scanner:", e); }
+            currentScannerInstance = null;
+        }
+        
         const container = document.getElementById('qrScannerContainer');
         container.style.display = 'block';
-        container.innerHTML = '<div id="reader" style="width:100%"></div>';
-        const html5Qr = new Html5Qrcode("reader");
-        scanner = html5Qr;
-        html5Qr.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, decoded => {
-            document.getElementById('barcodeInput').value = decoded;
-            lookupBarcode(decoded);
-            html5Qr.stop();
+        container.innerHTML = '<div id="reader" style="width:100%"></div><div class="scanner-overlay">Camera starting...</div>';
+        
+        const html5QrCode = new Html5Qrcode("reader");
+        currentScannerInstance = html5QrCode;
+        
+        const config = {
+            fps: 15,  // lower FPS = less CPU usage, still plenty fast
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0,
+            disableFlip: false
+        };
+        
+        try {
+            await html5QrCode.start(
+                { facingMode: "environment" },
+                config,
+                (decodedText) => {
+                    // Success callback
+                    document.getElementById('barcodeInput').value = decodedText;
+                    lookupBarcode(decodedText);
+                    // Stop scanner after successful scan
+                    stopScannerAndCleanup();
+                },
+                (errorMessage) => {
+                    // Ignore scanning errors (they are normal)
+                    // console.warn(errorMessage);
+                }
+            );
+            // Remove overlay after start
+            const overlay = container.querySelector('.scanner-overlay');
+            if (overlay) overlay.remove();
+        } catch(err) {
+            console.error("Camera start error:", err);
+            showToast("Could not start camera: " + err.message, true);
             container.style.display = 'none';
-        }, err => console.warn(err));
+            currentScannerInstance = null;
+        }
     }
+    
+    async function stopScannerAndCleanup() {
+        if (currentScannerInstance) {
+            try {
+                await currentScannerInstance.stop();
+                await currentScannerInstance.clear();
+            } catch(e) { console.warn(e); }
+            currentScannerInstance = null;
+        }
+        const container = document.getElementById('qrScannerContainer');
+        container.style.display = 'none';
+        container.innerHTML = '';
+    }
+    // =================================================================
 
     async function openModal(barcode) {
         try {
@@ -538,6 +606,7 @@
         if (url) document.getElementById('editImageUrl').value = url;
     }
 
+    // Event bindings
     document.getElementById('startScannerBtn').onclick = startCamera;
     document.getElementById('typeInBtn').onclick = () => { transactionType = "IN"; document.getElementById('typeInBtn').classList.add('bg-green-200'); document.getElementById('typeOutBtn').classList.remove('bg-red-200'); };
     document.getElementById('typeOutBtn').onclick = () => { transactionType = "OUT"; document.getElementById('typeOutBtn').classList.add('bg-red-200'); document.getElementById('typeInBtn').classList.remove('bg-red-200'); };
@@ -550,8 +619,13 @@
     document.getElementById('closeModalBtn').onclick = () => document.getElementById('productModal').classList.add('hidden');
     document.getElementById('editUploadPhotoBtn').onclick = editTakePhoto;
 
+    // Tab switching – also stop scanner when leaving Scan tab
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.onclick = () => {
+            if (btn.dataset.tab !== 'scan') {
+                // If leaving scan tab, stop scanner
+                stopScannerAndCleanup();
+            }
             document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
             document.getElementById(btn.dataset.tab + 'Tab').classList.remove('hidden');
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-active', 'bg-blue-600', 'text-white'));
